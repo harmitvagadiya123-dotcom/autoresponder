@@ -64,7 +64,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all project code
-COPY "ali_msg 1.py" .
+COPY ["ali_msg 1.py", "."]
 COPY entrypoint.sh .
 COPY app/ ./app/
 
