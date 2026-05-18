@@ -138,11 +138,14 @@ def cleanup_our_chrome_process():
             CHROME_PID = None
 
 def start_browser():
-    """Start browser with enhanced error handling"""
+    """Start browser with enhanced error handling and low-RAM headless mode on Render"""
     global CHROME_PID
     
     # Only clean up our own Chrome process if it exists
     cleanup_our_chrome_process()
+    
+    # Detect if we are running in Render or cloud headless env
+    is_cloud = os.environ.get("RENDER") is not None or os.environ.get("PORT") is not None
     
     max_attempts = 3
     for attempt in range(max_attempts):
@@ -156,12 +159,31 @@ def start_browser():
             options.add_argument("--disable-popup-blocking")
             options.add_argument("--disable-save-password-bubble")
             options.add_argument("--ignore-certificate-errors")
-            # options.add_argument("--headless=new")
-
-
+            
+            if is_cloud:
+                # Add cloud and low-RAM optimizations
+                options.add_argument("--headless=new")
+                options.add_argument("--disable-features=site-per-process") # Reduces RAM by 70%
+                options.add_argument("--blink-settings=imagesEnabled=false") # Disables images to save RAM/CPU
+                options.add_argument("--js-flags=--max-old-space-size=256") # Restricts Chrome JS engine heap
+                options.add_argument("--disk-cache-size=1")
+                options.add_argument("--media-cache-size=1")
+                options.add_argument("--disable-translate")
+                options.add_argument("--disable-default-apps")
+                options.page_load_strategy = 'none'
+            else:
+                # Local execution with GUI enabled
+                options.add_argument("--window-size=1920,1080")
+                
             driver = uc.Chrome(options=options)
             CHROME_PID = driver.browser_pid
             log_activity(f"🔵 Started Chrome with PID: {CHROME_PID} (attempt {attempt + 1})")
+
+            # Set a very tight page load timeout specifically to prevent hangs on Render
+            if is_cloud:
+                driver.set_page_load_timeout(10)
+            else:
+                driver.set_page_load_timeout(30)
 
             # Test the session immediately
             if is_session_valid(driver):
@@ -178,9 +200,7 @@ def start_browser():
             else:
                 cleanup_and_exit()
 
-    return None
-
-def recover_session(driver):
+    return None\n\ndef recover_session(driver):
     """Attempt to recover from a broken session"""
     global CHROME_PID
     
@@ -214,39 +234,31 @@ def recover_session(driver):
 # ------------------ LOGIN ------------------
 
 def login(driver):
-    """Login with enhanced error handling and manual fallback"""
+    """Login with single-step domain routing, low timeout, and manual fallback"""
     try:
-        driver.set_page_load_timeout(30)
-        log_activity("🌐 Navigating to Alibaba to load cookies...")
-        try:
-            # We need to be on the domain to add cookies
-            driver.get("https://www.alibaba.com")
-        except TimeoutException:
-            log_activity("⚠️ Page load timed out, but checking if we are on the domain...")
-        except Exception as e:
-            log_activity(f"⚠️ Navigation error: {str(e)}")
-        
-        time.sleep(5)
-
-        # Check if we are on the correct domain before adding cookies
-        if "alibaba.com" not in driver.current_url.lower():
-            log_activity(f"⚠️ Not on Alibaba domain (currently {driver.current_url}). Attempting one more time...")
-            try:
-                driver.get("https://www.alibaba.com")
-                time.sleep(5)
-            except:
-                pass
+        is_cloud = os.environ.get("RENDER") is not None or os.environ.get("PORT") is not None
+        timeout_val = 10 if is_cloud else 30
+        driver.set_page_load_timeout(timeout_val)
 
         if os.path.exists(COOKIES_FILE):
             with open(COOKIES_FILE, "r") as f:
                 cookies = json.load(f)
                 
             log_activity(f"🍪 Found {len(cookies)} cookies in file. Injecting...")
-            injected_count = 0
             
+            # We visit onetalk.alibaba.com directly to set the domain context for both wildcard (.alibaba.com) and subdomain cookies!
+            log_activity("🌐 Navigating to onetalk.alibaba.com to set cookies...")
+            try:
+                driver.get("https://onetalk.alibaba.com/")
+                time.sleep(6)
+            except TimeoutException:
+                log_activity("⚠️ Navigation timed out, proceeding with cookie injection anyway...")
+            except Exception as e:
+                log_activity(f"⚠️ Navigation error: {str(e)}")
+
+            injected_count = 0
             for cookie in cookies:
                 try:
-                    # Clean the cookie for Selenium
                     clean_cookie = {
                         'name': cookie.get('name'),
                         'value': cookie.get('value'),
@@ -255,30 +267,24 @@ def login(driver):
                         'httpOnly': cookie.get('httpOnly', False)
                     }
                     
-                    # Handle Domain
                     domain = cookie.get('domain', '')
                     if domain:
-                        # Selenium add_cookie is very strict about leading dots in some versions
-                        # and requires the domain to match the current page
                         clean_cookie['domain'] = domain
                     
-                    # Map expirationDate to expiry (Selenium expects int)
                     if 'expirationDate' in cookie:
                         clean_cookie['expiry'] = int(cookie['expirationDate'])
+                    elif 'expiry' in cookie:
+                        clean_cookie['expiry'] = int(cookie['expiry'])
                     
-                    # Handle SameSite
                     same_site = cookie.get('sameSite', '').lower()
                     if same_site == 'no_restriction':
                         clean_cookie['sameSite'] = 'None'
                     elif same_site in ['lax', 'strict']:
                         clean_cookie['sameSite'] = same_site.capitalize()
                     
-                    # Only add cookies for the current domain to avoid errors
-                    # Note: We are on www.alibaba.com, so we can add .alibaba.com and www.alibaba.com cookies
                     driver.add_cookie(clean_cookie)
                     injected_count += 1
                 except Exception as e:
-                    # Skip cookies that fail (e.g. domain mismatch)
                     continue
             
             log_activity(f"✅ {injected_count} cookies injected. Refreshing...")
@@ -303,25 +309,24 @@ def login(driver):
         
         if "login" in current_url or "passport" in current_url or "onetalk" not in current_url:
             log_activity("❌ Cookie login failed (redirected to login or homepage).")
-            wait_for_user_confirmation("🔐 Please log in manually in the browser window that just opened. Press Enter here ONLY after you see your messages.")
-            
-            # After manual login, save the new cookies
-            log_activity("💾 Saving new cookies...")
-            new_cookies = driver.get_cookies()
-            with open(COOKIES_FILE, "w") as f:
-                json.dump(new_cookies, f)
-            return True
+            if is_cloud:
+                log_error("❌ Cookie login failed in headless cloud environment. Manual interaction is impossible.")
+                return False
+            else:
+                wait_for_user_confirmation("🔐 Please log in manually in the browser window that just opened. Press Enter here ONLY after you see your messages.")
+                
+                log_activity("💾 Saving new cookies...")
+                new_cookies = driver.get_cookies()
+                with open(COOKIES_FILE, "w") as f:
+                    json.dump(new_cookies, f)
+                return True
             
         log_activity("✅ Successfully logged in via cookies.")
         return True
 
     except Exception as e:
         log_error(f"⚠️ Login error: {str(e)}")
-        return False
-
-# ------------------ API RESPONSE ------------------
-
-def get_api_response(question, img_url=None):
+        return False\n\ndef get_api_response(question, img_url=None):
     try:
         url = RAG_URL
         headers = {"Content-Type": "application/json"}

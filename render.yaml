@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: alibaba-autoresponder
+    runtime: docker
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    plan: starter
+    envVars:
+      # Base64-encoded cookies.json for Alibaba session
+      - key: COOKIES_BASE64
+        sync: false
+      # OpenAI API Key (optional, for gpt-4o-mini agent reasoning)
+      - key: OPENAI_API_KEY
+        sync: false
+      # Hugging Face Token (optional, for Qwen serverless model)
+      - key: HF_TOKEN
+        sync: false
+      # Model ID (optional, defaults to Qwen/Qwen2.5-Coder-32B-Instruct)
+      - key: MODEL_ID
+        value: "Qwen/Qwen2.5-Coder-32B-Instruct"
+      # Port for the health check server (Render sets this automatically)
+      - key: PORT
+        value: "10000"
