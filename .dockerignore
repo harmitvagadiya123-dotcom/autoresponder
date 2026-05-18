@@ -1,0 +1,19 @@
+.git
+.gitignore
+.dockerignore
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+activity.log
+error.log
+*.png
+*.jpg
+cookies.json
+cookies 2.json
+authorized_user.json
+credentials.json
+token.json

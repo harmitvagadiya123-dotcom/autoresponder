@@ -1,0 +1,11 @@
+undetected-chromedriver
+selenium
+psutil
+requests
+openpyxl
+smolagents[duckduckgo]
+python-dotenv
+flask
+gspread
+google-auth
+duckduckgo-search
