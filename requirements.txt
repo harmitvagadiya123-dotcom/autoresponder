@@ -3,7 +3,7 @@ selenium
 psutil
 requests
 openpyxl
-smolagents[duckduckgo]==0.8.0
+smolagents[duckduckgo]==0.1.3
 python-dotenv
 flask
 gspread
